@@ -104,7 +104,9 @@ function render(data) {
     }
   }
 }
-decode(location.hash).then(render).catch(error=>{
+const snapshotFragment=typeof window.portfolioShortSnapshot==='string'
+  ?'#v1.'+window.portfolioShortSnapshot:location.hash;
+decode(snapshotFragment).then(render).catch(error=>{
   root.replaceChildren();
   status.textContent='無法開啟快照：'+error.message;
 });
