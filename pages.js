@@ -4,12 +4,25 @@
   const storage = 'portfolio-web-pages-v1';
   const today = () => new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Taipei'}).format(new Date());
   const empty = () => ({version:1,revision:0,snapshots:[],quotes:{},included:null});
-  const read = () => JSON.parse(localStorage.getItem(storage) || 'null') || empty();
+  let sessionCopy;
+  function read() {
+    if (sessionCopy) return JSON.parse(sessionCopy);
+    try {return JSON.parse(localStorage.getItem(storage) || 'null') || empty();}
+    catch(error) {
+      if (!window.portfolioDrive || error.name !== 'SecurityError') throw error;
+      return empty();
+    }
+  }
 
   function write(next, revision) {
     if (read().revision !== revision) throw new Error('此瀏覽器的資料已更新，請重新整理再操作。');
     next.revision = revision + 1;
-    localStorage.setItem(storage, JSON.stringify(next));
+    const serialized = JSON.stringify(next);
+    try {localStorage.setItem(storage, serialized);}
+    catch(error) {
+      if (!window.portfolioDrive || error.name !== 'SecurityError') throw error;
+      sessionCopy = serialized;
+    }
     return next;
   }
 
@@ -67,13 +80,14 @@
     return day;
   }
 
-  function holding(data) {
+  function holding(data, allowMissingShares=false) {
     const code = String(data.code??'').trim().toUpperCase();
     if (!/^[A-Z0-9][A-Z0-9.\-]{0,24}$/.test(code)) throw new Error('缺少或無效的股票代號。');
-    const row = {code,name:String(data.name??''),shares:numeric(data.shares,true),cost:numeric(data.cost),
+    const row = {code,name:String(data.name??''),shares:numeric(data.shares,!allowMissingShares),cost:numeric(data.cost),
       price:numeric(data.price),market:numeric(data.market),pnl:numeric(data.pnl)};
     if ([row.shares,row.cost,row.price,row.market].some(value => value != null && value < 0))
       throw new Error(code+' 的股數、成本、價格或市值有負值。');
+    if (row.shares==null && row.market==null) throw new Error(code+' 缺少股數及原始市值。');
     return row;
   }
 
@@ -97,14 +111,15 @@
     });
   }
 
-  function us(record) {
-    const shares=numeric(field(record,'股數','數量'),true);
-    const price=numeric(field(record,'價格','現價'),true);
+  function us(record, historical=false) {
+    const shares=numeric(field(record,'股數','數量'),!historical);
+    const price=numeric(field(record,'價格','現價'),!historical);
     const unitCost=numeric(field(record,'單位成本'));
-    const cost=numeric(field(record,'總成本','成本')) ?? (unitCost==null?null:unitCost*shares);
-    const market=numeric(field(record,'市值')) ?? shares*price;
-    const pnl=numeric(field(record,'益損$','損益$')) ?? (cost==null?null:market-cost);
-    const row=holding({code:field(record,'股票','代號','股票代號'),shares,price,cost,market,pnl});
+    const cost=numeric(field(record,'總成本','成本')) ?? (unitCost==null||shares==null?null:unitCost*shares);
+    const market=numeric(field(record,'市值')) ?? (shares==null||price==null?null:shares*price);
+    const pnl=numeric(field(record,'益損$','損益$')) ?? (cost==null||market==null?null:market-cost);
+    const row=holding({code:field(record,'股票','代號','股票代號'),shares,price,cost,market,pnl},historical);
+    if (historical) return row;
     if (shares <= 0 || Math.abs(market-shares*price)>Math.max(.02,shares*price*.02))
       throw new Error(row.code+' 股數或市值與價格不符。');
     if (cost!=null && pnl!=null && Math.abs((market-cost)-pnl)>Math.max(1,market*.02))
@@ -140,7 +155,7 @@
     const {market,method,text,summary}=input;
     if (method==='paste') {
       if (market==='tw') return [snapshot('tw',input.account,input.date,records(text,'\t').map(tw),null,'貼上')];
-      return [snapshot('us','Firstrade',input.date,usPaste(text||summary).map(us),summaryText(summary+'\n'+text),'貼上')];
+      return [snapshot('us','Firstrade',input.date,usPaste(text||summary).map(record=>us(record)),summaryText(summary+'\n'+text),'貼上')];
     }
     const groups=new Map();
     const accounts=new Map(summary ? records(summary,',').map(row=>[day(row['日期']),{
@@ -151,7 +166,7 @@
       const date=day(record['日期']);
       const key=JSON.stringify([account,date]);
       const group=groups.get(key)||{account,date,rows:[]};
-      group.rows.push(market==='tw'?tw(record):us(record));
+      group.rows.push(market==='tw'?tw(record):us(record,true));
       groups.set(key,group);
     }
     return [...groups.values()].map(group=>snapshot(market,group.account,group.date,group.rows,
@@ -159,10 +174,28 @@
   }
 
   const identity = item => JSON.stringify([item.market,item.account,item.date]);
+  function syncDrive(state, backups) {
+    const items = imported({market:'us',method:'csv',text:backups.stock,summary:backups.account});
+    if (backups.taiwan) items.push(...imported({market:'tw',method:'csv',text:backups.taiwan}));
+    const current = new Map(state.snapshots.map(item => [identity(item), item]));
+    let added=0, conflicts=0;
+    for (const item of items) {
+      item.source='Google Drive';
+      const previous=current.get(identity(item));
+      if (previous && JSON.stringify([previous.rows,previous.summary])===JSON.stringify([item.rows,item.summary]))
+        continue;
+      if (previous && previous.source!=='Google Drive') {conflicts++;continue;}
+      state.snapshots.push(item);
+      current.set(identity(item), item);
+      added++;
+    }
+    state.lastDriveSync=new Date().toISOString();
+    return {added,conflicts,taiwan:Boolean(backups.taiwan)};
+  }
   function backup(input) {
     if (input.version!==1 || !Array.isArray(input.snapshots) || typeof input.quotes!=='object' || input.quotes===null)
       throw new Error('備份格式不正確。');
-    const snapshots=input.snapshots.map(item=>snapshot(item.market,item.account,item.date,item.rows.map(holding),
+    const snapshots=input.snapshots.map(item=>snapshot(item.market,item.account,item.date,item.rows.map(row=>holding(row,item.market==='us')),
       item.summary==null?null:{
         total:numeric(item.summary.total),stock:numeric(item.summary.stock),margin:numeric(item.summary.margin)
       },String(item.source)));
@@ -201,6 +234,10 @@
     }
     if (path==='restore') {
       return {state:write(backup(input.data),input.revision)};
+    }
+    if (path==='drive-sync' && window.portfolioDrive) {
+      const result=syncDrive(state,input.backups);
+      return {...result,state:write(state,state.revision)};
     }
     throw new Error('GitHub Pages 版可讀取匯入的行情備份。');
   }

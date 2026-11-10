@@ -4,9 +4,10 @@ const marketNames={tw:'台股',us:'美股'};
 const marketUnit={tw:'NT$',us:'US$'};
 const marketKey=item=>item.market+':'+item.account;
 const money=(value,unit)=>value==null?'—':unit+' '+value.toLocaleString('zh-TW',{maximumFractionDigits:unit==='US$'?2:0});
-const amount=value=>value.toLocaleString('zh-TW',{maximumFractionDigits:6});
+const amount=value=>value==null?'—':value.toLocaleString('zh-TW',{maximumFractionDigits:6});
 const palette=['#006652','#365ab5','#b34a20','#782f9e','#776000','#a02b68'];
 const pages=window.portfolioPages;
+const drive=window.portfolioDrive;
 let state,token,today,page='overview',mode='benchmark',busy=false,preview,formVersion=0;
 const muted=new Set();
 
@@ -54,7 +55,7 @@ function quote(key,day){
 }
 function valueRow(item,row,day){
   const close=quote(item.market+':'+row.code,day);
-  if(close&&close.date>=item.date)return {value:close.value*row.shares,date:close.date,source:'行情'};
+  if(close&&close.date>=item.date&&row.shares!=null)return {value:close.value*row.shares,date:close.date,source:'行情'};
   return {value:row.market,date:item.date,source:'券商快照'};
 }
 function valueAccount(item,day){
@@ -338,7 +339,7 @@ function bind(){
     $('restoreFile').focus();
   }:refresh;
   if(pages){
-    $('edition').textContent='GitHub Pages · 資料存於此瀏覽器';
+    $('edition').textContent=drive?'私人 Google Drive 同步版':'GitHub Pages · 資料存於此瀏覽器';
     $('refresh').textContent='匯入行情備份';
     $('backupHelp').textContent='持股留在此瀏覽器。可下載備份，也可還原本機版匯出的 JSON，帶入行情與匯率。';
     $('restoreForm').hidden=false;
@@ -386,11 +387,34 @@ function bind(){
     catch{$('copyFallback').value=prompt;$('copyFallback').hidden=false;$('copyFallback').select();}
   };
 }
+async function syncDrive(){
+  const display=$('driveStatus');
+  const previous=state.lastDriveSync
+    ?'上次成功：'+new Date(state.lastDriveSync).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})+'。 ':'';
+  $('driveRefresh').disabled=true;
+  display.textContent=previous+'正在讀取私人備份。';
+  try{
+    const backups=await drive();
+    const result=await api('drive-sync',{backups});
+    state=result.state;
+    display.textContent='已同步 Google Drive，新增 '+result.added+' 筆快照。'
+      +(result.taiwan?'':' 台股尚未指定 Drive 備份。')
+      +(result.conflicts?' 已保留 '+result.conflicts+' 筆同日手動匯入紀錄。':'');
+    if(!busy)render();
+  }catch(error){
+    display.textContent=previous+error.message;
+  }finally{$('driveRefresh').disabled=false;}
+}
 (async()=>{
   try{
     ({state,token,today}=await api('state'));bind();render();
     $('refresh').disabled=!pages&&!state.snapshots.length;
     status(state.snapshots.length?(pages?'已載入此瀏覽器的持股。':'已載入本機紀錄。'):'尚未匯入資料。請使用下方的匯入按鈕。');
+    if(drive){
+      $('drivePanel').hidden=false;
+      $('driveRefresh').onclick=syncDrive;
+      await syncDrive();
+    }
     if(!pages&&state.snapshots.length&&state.lastRefresh!==today)refresh();
   }catch(error){status('載入失敗：'+error.message);}
 })();
