@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; connect-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台美股投資組合</title>
+<link rel="stylesheet" href="./style.css">
+<script defer src="./pages.js"></script>
+<script defer src="./app.js"></script>
+<header><div><strong>台美股投資組合</strong><span id="edition">本機版</span></div></header>
+<main>
+<nav aria-label="頁籤"><button data-page="overview">整合總覽</button><button data-page="tw">台股明細</button><button data-page="us">美股明細</button><button data-page="settings">設定</button></nav>
+<p id="status" class="status" role="status">載入中</p>
+<section id="overview">
+<div class="bar"><h1>整合總覽</h1><button class="primary" id="refresh">更新行情</button></div>
+<p>合計為股票市值，美元按估值日可用的 USD/TWD 匯率換算。</p>
+<div class="card" id="emptyGuide" hidden><h2>先匯入持股，首頁就會顯示資料</h2><p>可選擇台股 V1.5 的歷史 CSV，或貼上券商資料。</p><div class="actions"><button data-import="tw" class="primary">匯入台股</button><button data-import="us">匯入美股</button></div></div>
+<div class="grid"><div class="card total">台美股合計<strong id="combined"></strong></div><div class="card">台股市值<strong id="twTotal"></strong></div><div class="card">美股市值<strong id="usTotal"></strong></div></div>
+<p id="sources"></p>
+<div class="card"><div class="bar"><h2>合計市值走勢</h2><label>期間 <select id="overviewPeriod"></select></label></div><div id="overviewChart"></div></div>
+</section>
+<section id="detail" hidden>
+<div class="bar"><h1 id="marketTitle"></h1><button class="primary" id="showImport">匯入持股</button></div>
+<form id="import" class="card" hidden>
+<h2>貼上或上傳持股</h2>
+<label>匯入方式 <select id="method"><option value="paste">貼上券商資料</option><option value="csv">選擇歷史 CSV</option></select></label>
+<div id="pasteFields">
+<label id="accountField">台股帳戶 <input id="importAccount" list="accountNames" value="主帳號"><datalist id="accountNames"></datalist></label>
+<label>資料日期 <input id="date" type="date"></label>
+<label id="summaryTextField">Firstrade 帳戶摘要（選填） <textarea id="summaryText"></textarea></label>
+<label>券商資料 <textarea id="text" placeholder="請包含欄位標題。Firstrade 可貼完整內容。"></textarea></label>
+</div>
+<div id="csvFields" hidden>
+<p id="csvHelp"></p>
+<label>持股 CSV <input id="csv" type="file" accept=".csv,text/csv"></label>
+<label id="summaryFileField">帳戶摘要 CSV（選填） <input id="summaryFile" type="file" accept=".csv,text/csv"></label>
+</div>
+<div class="actions"><button class="primary" type="submit">預覽與驗證</button><button id="cancel" type="button">取消</button></div>
+<div id="preview" hidden></div>
+</form>
+<div class="card"><div class="bar"><h2>持股</h2><label>帳戶 <select id="account"></select></label></div><p id="holdingDate"></p><div class="scroll" id="holdings"></div></div>
+<div class="card"><div class="bar"><h2>市值分析</h2><label>期間 <select id="marketPeriod"></select></label></div>
+<div class="actions"><button id="benchmark">基準比較</button><button id="individual">個股市值</button></div><p id="chartNote"></p><div id="marketChart"></div></div>
+<div class="card"><h2>持股分析</h2><p id="concentration"></p><button id="copy">複製分析摘要到 ChatGPT</button><textarea id="copyFallback" aria-label="持股分析摘要" readonly hidden></textarea></div>
+<div class="card"><h2>匯入紀錄</h2><div id="revisions" class="scroll"></div></div>
+</section>
+<section id="settings" hidden><h1>設定</h1><div class="card"><h2>計入台美股合計的帳戶</h2><form id="settingsForm"><div id="options"></div><button type="submit" class="primary">儲存總覽設定</button></form></div><div class="card"><h2>私人備份</h2><p id="backupHelp">下載 JSON 可保留快照、修訂和行情。還原方式見專案說明。</p><button id="backup">下載備份</button><form id="restoreForm" hidden><label>選擇 JSON 備份 <input id="restoreFile" type="file" accept=".json,application/json" required></label><button type="submit">還原備份</button></form></div></section>
+</main></html>
